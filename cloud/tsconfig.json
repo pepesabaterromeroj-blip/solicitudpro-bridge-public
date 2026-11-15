@@ -1,0 +1,4 @@
+{
+  "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler", "strict": true, "noEmit": true, "skipLibCheck": true, "types": ["@cloudflare/workers-types"], "lib": ["ES2022"] },
+  "include": ["*.ts", "../src/relay-protocol.ts", "../src/smoke-mcp-server.ts", "../tests/fixtures/oauth-worker.ts"]
+}

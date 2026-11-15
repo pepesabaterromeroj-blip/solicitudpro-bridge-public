@@ -1,0 +1,42 @@
+{
+  "name": "solicitudpro-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Private local MCP bridge between ChatGPT-compatible MCP clients and Codex app-server.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/src/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:integration": "node --import tsx --test tests/integration/*.test.ts",
+    "inspect": "npx @modelcontextprotocol/inspector@latest node dist/src/index.js",
+    "relay": "node dist/local/start-relay.js",
+    "doctor": "node dist/local/start-relay.js --doctor",
+    "macos:relay": "node dist/local/macos-launch-agent.js",
+    "device": "node dist/local/device-admin.js",
+    "approve-change": "node dist/local/approve-change.js",
+    "cloud:check": "tsc -p cloud/tsconfig.json",
+    "cloud:build": "wrangler deploy -c cloud/wrangler.jsonc --dry-run --outdir ../tmp/gateway",
+    "test:gateway": "npm run cloud:build && wrangler deploy -c tests/fixtures/wrangler.jsonc --dry-run --outdir ../../tmp/oauth-test && node --import tsx --test tests/integration/gateway-relay.test.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^1.2.4",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "ws": "^8.22.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261102.1",
+    "@types/node": "^24.10.0",
+    "@types/ws": "^8.18.2",
+    "miniflare": "^5.20261101.0-beta",
+    "tsx": "^4.20.6",
+    "typescript": "7.0.2",
+    "wrangler": "^4.156.1"
+  }
+}

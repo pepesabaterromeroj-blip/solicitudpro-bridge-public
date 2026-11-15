@@ -1,0 +1,53 @@
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { AppServerClient } from '../../src/app-server-client.js';
+import { ProjectRegistry } from '../../src/project-registry.js';
+import { ChangeApprovalStore } from '../../src/change-approval.js';
+import { ProjectChangeService } from '../../src/project-change.js';
+import { ReadOnlyCodexAnalyzer } from '../../src/project-analyze.js';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { createSmokeMcpServer } from '../../src/smoke-mcp-server.js';
+test('real fixture MCP prepare approve apply preserves thread and returns diff without terminal or commit', {timeout: 180000}, async () => {
+const local = JSON.parse(await readFile('config/local.json', 'utf8'));
+const base = await mkdtemp(path.join(tmpdir(), 'bridge-change-fixture-')); const repo = path.join(base, 'repo'); await mkdir(path.join(repo, 'src'), { recursive: true });
+await writeFile(path.join(repo, 'src/app.js'), 'export const count = 1;\n');
+await writeFile(path.join(repo, 'src/protected.js'), 'export const protectedValue = 1;\n');
+for (const args of [['init'], ['add', '.'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'fixture']]) execFileSync('git', ['-C', repo, ...args], { windowsHide: true });
+const config = path.join(base, 'local.json'); await writeFile(config, JSON.stringify({ projects: { fixture: { path: repo, changeRoots: ['src'] } } }));
+const registry = await ProjectRegistry.load(config); const approvals = new ChangeApprovalStore(path.join(base, 'approvals'));
+const analyzer = new ReadOnlyCodexAnalyzer(registry, 'fixture-device', path.join(base, 'threads.json'), () => new AppServerClient({ command: local.codex.command }));
+const thread = await analyzer.analyze('fixture', 'Sin usar herramientas, responde FIXTURE_READY.');
+assert.equal(thread.selectedProfile, 'fast'); assert.equal(thread.requestedReasoning, 'low');
+const normal = await analyzer.analyze('fixture', 'Sin usar herramientas, confirma que continúa el mismo hilo.', { profile: 'standard', category: 'implementation' });
+assert.equal(normal.threadId, thread.threadId); assert.equal(normal.threadCreated, false); assert.equal(normal.selectedProfile, 'standard'); assert.equal(normal.requestedReasoning, 'medium');
+let changes = new ProjectChangeService(registry, 'fixture-device', approvals, async () => thread.threadId, local.codex.command);
+const mcp = createSmokeMcpServer(async () => ({ bridge: 'ok', codex: 'ok', response: 'BRIDGE_E2E_OK' }), undefined, ['bridge:read', 'bridge:write'], undefined, undefined, undefined, undefined, { prepare: (p, i, options) => changes.prepare(p, i, options), approve: id => changes.approve(id), apply: id => changes.apply(id) });
+const client = new Client({ name: 'fixture', version: '1' }); const [a, b] = InMemoryTransport.createLinkedPair();
+await mcp.connect(a); await client.connect(b);
+try {
+const before = await readFile(path.join(repo, 'src/app.js'), 'utf8');
+const preparation = await client.callTool({ name: 'codex_project_change_prepare', arguments: { project: 'fixture', instruction: 'Change count from 1 to 2 in src/app.js only. Preserve everything else.', profile: 'deep', category: 'security' } });
+assert.notEqual(preparation.isError, true); const prepared = preparation.structuredContent as any;
+assert.equal(await readFile(path.join(repo, 'src/app.js'), 'utf8'), before);
+assert.equal(prepared.selectedProfile, 'deep'); assert.equal(prepared.requestedReasoning, 'high');
+console.log(JSON.stringify({ prepared: true, threadId: prepared.threadId, files: prepared.files, requiresHuman: prepared.approvalStatus }));
+assert.equal((await client.callTool({ name: 'codex_project_change_apply', arguments: { approvalId: prepared.approvalId } })).isError, true);
+const original = await approvals.get(prepared.approvalId);
+assert.notEqual((await client.callTool({ name: 'codex_project_change_approve', arguments: { approvalId: prepared.approvalId } })).isError, true);
+assert.deepEqual(await approvals.get(prepared.approvalId), { ...original, humanApproved: true });
+changes = new ProjectChangeService(registry, 'fixture-device', new ChangeApprovalStore(path.join(base, 'approvals')), async () => thread.threadId, local.codex.command);
+const applied = await client.callTool({ name: 'codex_project_change_apply', arguments: { approvalId: prepared.approvalId } });
+assert.notEqual(applied.isError, true); const result = applied.structuredContent as any;
+assert.equal(result.status, 'completed'); assert.equal(result.threadId, prepared.threadId); assert.equal(result.headBefore, result.headAfter); assert.equal(result.git.staged, 0); assert.equal(result.tests[0]?.exitCode, 0); assert.match(result.boundedDiff, /count = 2/);
+assert.equal(result.selectedProfile, prepared.selectedProfile); assert.equal(result.requestedReasoning, prepared.requestedReasoning); assert.equal(result.requestedModel, prepared.requestedModel);
+if (!(await readFile(path.join(repo, 'src/app.js'), 'utf8')).includes('= 2')) throw new Error('Fixture change not applied');
+if ((await readFile(path.join(repo, 'src/protected.js'), 'utf8')) !== 'export const protectedValue = 1;\n') throw new Error('Protected file changed');
+assert.equal((await client.callTool({ name: 'codex_project_change_approve', arguments: { approvalId: prepared.approvalId } })).isError, true);
+} finally { await client.close(); await mcp.close(); }
+
+});

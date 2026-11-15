@@ -1,0 +1,7 @@
+{
+  "name": "local-test-only-never-deploy",
+  "main": "oauth-worker.ts",
+  "compatibility_date": "2026-11-02",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": false
+}

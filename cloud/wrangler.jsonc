@@ -1,0 +1,14 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "solicitudpro-bridge-gateway",
+  "main": "gateway.ts",
+  "compatibility_date": "2026-11-02",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "00000000000000000000000000000000" }],
+  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "Relay" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }],
+  "vars": { "DEVICE_ID": "example-device", "GATEWAY_ORIGIN": "https://replace-with-worker.workers.dev" },
+  "observability": { "enabled": false }
+}

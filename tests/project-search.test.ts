@@ -1,0 +1,54 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, readFile, writeFile, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { ProjectRegistry } from '../src/project-registry.js';
+import { searchProject } from '../src/project-search.js';
+
+test('literal search reads only configured tracked text, bounds output and preserves Git', async () => {
+  const base = await mkdtemp(path.join(tmpdir(), 'bridge-search-'));
+  const repo = path.join(base, 'repo');
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+  const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
+  git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.test');
+  await mkdir(path.join(repo, 'js')); await mkdir(path.join(repo, 'docs'));
+  await writeFile(path.join(repo, 'js', 'app.js'), 'const phase = "C19";\n// C19 again\nconst x = "NO_MATCH";\n');
+  await writeFile(path.join(repo, 'docs', 'state.md'), '# C19 status\n');
+  await writeFile(path.join(repo, 'docs', 'secret.md'), 'C19 password=SHOULD_NOT_LEAK\n');
+  await writeFile(path.join(repo, 'js', '.env'), 'C19 SHOULD_NOT_LEAK');
+  git('add', 'js/app.js', 'docs/state.md', 'docs/secret.md'); git('add', '-f', 'js/.env'); git('commit', '-qm', 'base');
+  await writeFile(path.join(repo, 'js', 'untracked.js'), 'C19 untracked');
+  const config = path.join(base, 'local.json');
+  await writeFile(config, JSON.stringify({ projects: { solicitudpro: { path: repo, searchRoots: ['js', 'docs'] } } }));
+  const registry = await ProjectRegistry.load(config);
+  const beforeHead = git('rev-parse', 'HEAD'), beforeStatus = git('status', '--porcelain=v1', '-uall');
+  const result = await searchProject(registry, 'solicitudpro', 'C19', 'class-windows');
+  assert.equal(result.project, 'solicitudpro'); assert.equal(result.deviceId, 'class-windows');
+  assert.equal(result.totalMatches, 3); assert.equal(result.matches.length, 3);
+  assert.deepEqual(result.matches.map(m => [m.file, m.line]), [['docs/state.md', 1], ['js/app.js', 1], ['js/app.js', 2]]);
+  assert.equal(result.truncated, false);
+  assert.ok(!JSON.stringify(result).includes('SHOULD_NOT_LEAK'));
+  assert.ok(!JSON.stringify(result).includes(base));
+  assert.equal((await searchProject(registry, 'solicitudpro', 'absent', 'class-windows')).totalMatches, 0);
+  assert.equal(git('rev-parse', 'HEAD'), beforeHead); assert.equal(git('status', '--porcelain=v1', '-uall'), beforeStatus);
+  for (const project of ['unknown', '../../', 'C:\\Windows']) await assert.rejects(searchProject(registry, project, 'C19', 'class-windows'));
+  for (const query of ['../', '.env', 'a', 'x'.repeat(81), 'C:\\Windows']) await assert.rejects(searchProject(registry, 'solicitudpro', query, 'class-windows'));
+  await writeFile(config, JSON.stringify({ projects: { solicitudpro: { path: repo, searchRoots: ['../outside'] } } }));
+  await assert.rejects(searchProject(await ProjectRegistry.load(config), 'solicitudpro', 'C19', 'class-windows'));
+  await writeFile(path.join(repo, 'js', 'many.js'), Array.from({length: 30}, () => 'C19').join('\n'));
+  git('add', 'js/many.js');
+  const limited = await searchProject(registry, 'solicitudpro', 'C19', 'class-windows');
+  assert.equal(limited.totalMatches, 33); assert.equal(limited.matches.length, 10); assert.equal(limited.truncated, true);
+  assert.ok(Buffer.byteLength(JSON.stringify(limited)) <= 3000);
+  try {
+    await writeFile(path.join(base, 'outside.js'), 'C19 OUTSIDE_DO_NOT_LEAK');
+    await symlink(path.join(base, 'outside.js'), path.join(repo, 'js', 'linked.js'));
+    git('add', 'js/linked.js');
+    const safe = await searchProject(registry, 'solicitudpro', 'C19', 'class-windows');
+    assert.ok(!safe.matches.some(m => m.file === 'js/linked.js'));
+    assert.ok(!JSON.stringify(safe).includes('OUTSIDE_DO_NOT_LEAK'));
+  } catch (error: any) { if (error?.code !== 'EPERM') throw error; }
+  assert.equal(await readFile(path.join(repo, 'js', 'app.js'), 'utf8'), 'const phase = "C19";\n// C19 again\nconst x = "NO_MATCH";\n');
+});

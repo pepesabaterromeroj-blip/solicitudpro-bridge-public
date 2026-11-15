@@ -1,0 +1,33 @@
+{
+  "projects": {
+    "solicitudpro": {
+      "path": "D:\\replace-with-local-path\\solicitudpro",
+      "description": "SolicitudPro local checkout",
+      "searchRoots": ["js", "tests", "docs/proyecto", "docs/contexto-chatgpt"],
+      "changeRoots": [],
+      "contextSources": [
+        { "path": "AGENTS.md", "role": "instructions" },
+        { "path": "docs/contexto-chatgpt/CONTEXTO_OPERATIVO_CODEX.md", "role": "operational" },
+        { "path": "docs/contexto-chatgpt/CONTINUIDAD_EQUIPOS.md", "role": "continuity" },
+        { "path": "docs/proyecto/RESULTADO_C19_GLOBAL.md", "role": "phase-result" }
+      ]
+    }
+  },
+  "codex": {
+    "command": "codex",
+    "defaultModel": null,
+    "defaultReasoningEffort": "medium",
+    "defaultSandbox": "read-only",
+    "defaultApprovalPolicy": "on-request"
+  },
+  "relay": {
+    "enabled": false,
+    "gatewayOrigin": "https://replace-with-worker.workers.dev",
+    "deviceId": "your-device-id",
+    "tokenFile": "config/relay-token.txt"
+  },
+  "tunnel": {
+    "enabled": false,
+    "status": "blocked_api_key_or_account_action"
+  }
+}
